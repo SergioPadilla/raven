@@ -1,0 +1,4 @@
+aiodns==1.1.1
+aiohttp==3.4.4
+cchardet==2.1.4
+marshmallow==2.16.3
