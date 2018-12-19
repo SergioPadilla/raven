@@ -1,57 +1,46 @@
-from aiohttp import web, ClientSession
+import json
+
+from aiohttp import web
 from marshmallow import Schema, fields
+
+from raven.handlers.redis import RedisKeys
 
 
 class DataSchema(Schema):
-    url = fields.Str()
-    method = fields.Str()
-    message = fields.Dict()
+    url = fields.Str(required=True)
+    method = fields.Str(required=True)
+    message = fields.Dict(required=True)
 
 
 class RegisterSchema(Schema):
-    channel = fields.Str()
-    data = fields.Nested(DataSchema())
-
-
-async def make_request(method, url, message):
-    resp = None
-
-    async with ClientSession() as session:
-        if method.upper() == 'GET':
-            resp = await session.get(url=url, params=message)
-
-        elif method.upper() == 'POST':
-            resp = await session.post(url=url, json=message)
-
-    return resp
+    channel = fields.Str(required=True)
+    data = fields.Nested(DataSchema(), required=True)
 
 
 async def register(request):
-    steps = []
+    response = {}
     status = 200
 
     body = await request.json()
 
     schema = RegisterSchema()
-
     errors = schema.validate(body)
+
     if not errors:
         if body.get('channel') == 'http':
             data = body.get('data')
-            url = data.get('url')
-            message = data.get('message')
-            method = data.get('method')
 
-            resp = await make_request(method=method, url=url, message=message)
-            steps.append({'status': 'sent'})
+            if data:
+                print('Inserting data in redis')
+                request.app['redis'].lpush(key=RedisKeys.TO_PROCESS, value=json.dumps(data))
+                response = {'status': 'registered'}
 
-            if resp and resp.status == 200:
-                steps.append({'status': 'notified'})
-            else:
-                steps.append({'status': 'failed'})
+        else:
+            response = {'status': 'bad_request', 'errors': {'channel': 'channel not allowed'}}
+            status = 400
 
     else:
-        steps = {'status': 'bad_request', 'errors': errors}
+        response = {'status': 'bad_request', 'errors': errors}
         status = 400
 
-    return web.json_response({'status': steps}, status=status)
+    return web.json_response(response, status=status)
